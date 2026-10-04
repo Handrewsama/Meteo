@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Badalona · Pluja · Diagnòstic Sentilo</title>
+<style>
+body{font-family:system-ui;margin:0;background:#091321;color:#eef6ff}
+main{max-width:1000px;margin:auto;padding:20px}.card{background:#102238;border:1px solid #284763;border-radius:14px;padding:16px;margin:12px 0}
+h1{margin:0}.muted{opacity:.7}.ok{color:#73e6a2}.bad{color:#ff8e8e}.warn{color:#ffd479}
+button{padding:10px 14px;border:0;border-radius:9px;background:#28618f;color:white;font-weight:600}
+pre{white-space:pre-wrap;word-break:break-word;background:#07101c;padding:12px;border-radius:10px;max-height:360px;overflow:auto}
+table{width:100%;border-collapse:collapse}td,th{padding:9px;border-bottom:1px solid #284763;text-align:left}
+.big{font-size:34px;font-weight:700}
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+<h1>🌧️ Pluja a Badalona</h1>
+<div class="muted">Prova de connexió amb la API de Sentilo de la Diputació de Barcelona</div>
+<p><button onclick="run()">Provar connexió</button></p>
+<div id="summary" class="big">—</div>
+</div>
+
+<div class="card">
+<h2>1. Descobriment de pluviòmetres</h2>
+<table><thead><tr><th>Endpoint</th><th>Resultat</th></tr></thead>
+<tbody id="tests"></tbody></table>
+</div>
+
+<div class="card">
+<h2>2. Sensors trobats</h2>
+<table><thead><tr><th>Provider</th><th>Sensor</th><th>Unitat</th><th>Component</th><th>Públic</th></tr></thead>
+<tbody id="sensors"><tr><td colspan="5">—</td></tr></tbody></table>
+</div>
+
+<div class="card">
+<h2>3. Resposta tècnica</h2>
+<pre id="log">Prem "Provar connexió".</pre>
+</div>
+
+<div class="card muted">
+<strong>Què estem comprovant?</strong><br>
+La documentació de Sentilo indica que el catàleg es consulta amb <code>GET /catalog</code>
+i que es pot filtrar per tipus de sensor; per a dades d'un proveïdor, l'endpoint és
+<code>GET /catalog/data/{provider}</code>. La infraestructura de Smart Region de la Diputació
+utilitza <code>https://api-sentilo.diba.cat/</code>. Si el servidor exigeix una credencial o bloqueja CORS,
+aquesta pàgina ho mostrarà explícitament en lloc de quedar-se en blanc.
+</div>
+</main>
+
+<script>
+const API="https://api-sentilo.diba.cat";
+const tests=[
+  API+"/catalog?type=pluviometer",
+  API+"/catalog?componentType=meteo&type=pluviometer",
+  API+"/catalog"
+];
+let logLines=[];
+
+async function req(url){
+  const t=performance.now();
+  try{
+    const r=await fetch(url,{method:"GET",headers:{"Accept":"application/json"}});
+    const text=await r.text();
+    let data=null; try{data=JSON.parse(text)}catch{}
+    return {ok:r.ok,status:r.status,text,data,ms:Math.round(performance.now()-t),url};
+  }catch(e){return {ok:false,status:"FETCH",text:String(e),data:null,ms:Math.round(performance.now()-t),url}}
+}
+function addLog(x){logLines.push(JSON.stringify(x,null,2));document.getElementById("log").textContent=logLines.join("\n\n---\n\n")}
+async function run(){
+  logLines=[];
+  document.getElementById("summary").textContent="Consultant…";
+  document.getElementById("tests").innerHTML="";
+  document.getElementById("sensors").innerHTML="";
+  let found=[];
+  for(const url of tests){
+    const x=await req(url);
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${url.replace(API,"")}</td><td class="${x.ok?"ok":"bad"}">${x.status} · ${x.ms} ms</td>`;
+    document.getElementById("tests").appendChild(tr);
+    addLog(x);
+    if(x.ok&&x.data){
+      if(Array.isArray(x.data)) found=found.concat(x.data);
+      if(x.data.providers) found=found.concat(x.data.providers);
+    }
+    if(x.ok&&x.data?.providers) break;
+  }
+
+  const rows=[];
+  for(const p of found){
+    const provider=p.provider||"";
+    for(const s of (p.sensors||[])){
+      const type=(s.type||"").toLowerCase();
+      if(type==="pluviometer" || type.includes("pluv") || (s.componentType||"").toLowerCase()==="meteo"){
+        rows.push({provider,...s});
+      }
+    }
+  }
+
+  const seen=new Set();
+  const unique=rows.filter(x=>{const k=x.provider+"/"+x.sensor;if(seen.has(k))return false;seen.add(k);return true});
+  if(unique.length){
+    document.getElementById("sensors").innerHTML=unique.map(s=>`
+      <tr><td>${s.provider}</td><td>${s.sensor}</td><td>${s.unit||"—"}</td>
+      <td>${s.component||"—"}</td><td>${s.publicAccess===true||s.publicAccess==="true"?"Sí":"No/—"}</td></tr>`).join("");
+    document.getElementById("summary").textContent=`${unique.length} pluviòmetre(s) detectat(s)`;
+  }else{
+    document.getElementById("summary").textContent="No s'han pogut descobrir pluviòmetres";
+    document.getElementById("sensors").innerHTML="<tr><td colspan='5'>Cap sensor retornat. Mira la resposta tècnica.</td></tr>";
+  }
+}
+run();
+</script>
+</body>
+</html>
