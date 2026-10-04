@@ -1287,6 +1287,903 @@ function median(values) {
 
 }
 
+// ============================================================
+// HISTÒRIC DE PRECIPITACIÓ - CLOUDFLARE KV
+// ============================================================
+
+const HISTORY_KEY = "badalona:rain:history";
+
+const HISTORY_MINUTES = 24 * 60;
+
+
+// ------------------------------------------------------------
+// LLEGIR HISTÒRIC
+// ------------------------------------------------------------
+
+async function loadHistory(env) {
+
+  if (!env.METEO_KV) {
+    return [];
+  }
+
+  try {
+
+    const data =
+      await env.METEO_KV.get(
+        HISTORY_KEY,
+        "json"
+      );
+
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data;
+
+  } catch (error) {
+
+    console.error(
+      "KV read error:",
+      error
+    );
+
+    return [];
+
+  }
+
+}
+
+
+// ------------------------------------------------------------
+// GUARDAR HISTÒRIC
+// ------------------------------------------------------------
+
+async function saveHistory(
+  env,
+  history
+) {
+
+  if (!env.METEO_KV) {
+    return false;
+  }
+
+  try {
+
+    await env.METEO_KV.put(
+
+      HISTORY_KEY,
+
+      JSON.stringify(
+        history
+      )
+
+    );
+
+    return true;
+
+  } catch (error) {
+
+    console.error(
+      "KV write error:",
+      error
+    );
+
+    return false;
+
+  }
+
+}
+
+
+// ------------------------------------------------------------
+// AFEGIR UNA LECTURA
+// ------------------------------------------------------------
+
+async function addHistoryPoint(
+  env,
+  stations
+) {
+
+  const history =
+    await loadHistory(
+      env
+    );
+
+
+  const now =
+    Date.now();
+
+
+  const point = {
+
+    timestamp:
+      new Date(
+        now
+      ).toISOString(),
+
+    epoch:
+      now,
+
+    stations:
+      stations.map(
+        station => ({
+
+          id:
+            station.id,
+
+          name:
+            station.name,
+
+          source:
+            station.source,
+
+          rain:
+            Number.isFinite(
+              station.rainToday
+            )
+              ? station.rainToday
+              : null
+
+        })
+      )
+
+  };
+
+
+  history.push(
+    point
+  );
+
+
+  const cutoff =
+    now -
+    (
+      HISTORY_MINUTES *
+      60 *
+      1000
+    );
+
+
+  const filtered =
+    history.filter(
+      item =>
+        item.epoch >=
+        cutoff
+    );
+
+
+  await saveHistory(
+    env,
+    filtered
+  );
+
+
+  return filtered;
+
+}
+
+
+// ------------------------------------------------------------
+// OBTENIR LA MEDIANA D'UNA LECTURA
+// ------------------------------------------------------------
+
+function historyMedian(
+  point
+) {
+
+  if (
+    !point ||
+    !Array.isArray(
+      point.stations
+    )
+  ) {
+
+    return null;
+
+  }
+
+
+  const values =
+    point.stations
+
+      .map(
+        station =>
+          station.rain
+      )
+
+      .filter(
+        value =>
+          Number.isFinite(
+            value
+          )
+      );
+
+
+  return median(
+    values
+  );
+
+}
+
+
+// ------------------------------------------------------------
+// BUSCAR EL PUNT MÉS PROPER A UN MOMENT
+// ------------------------------------------------------------
+
+function findHistoryPoint(
+  history,
+  targetEpoch
+) {
+
+  if (
+    !history.length
+  ) {
+
+    return null;
+
+  }
+
+
+  let closest =
+    history[0];
+
+
+  let difference =
+    Math.abs(
+      history[0].epoch -
+      targetEpoch
+    );
+
+
+  for (
+    const point of history
+  ) {
+
+    const currentDifference =
+      Math.abs(
+        point.epoch -
+        targetEpoch
+      );
+
+
+    if (
+      currentDifference <
+      difference
+    ) {
+
+      closest =
+        point;
+
+      difference =
+        currentDifference;
+
+    }
+
+  }
+
+
+  return closest;
+
+}
+
+
+// ------------------------------------------------------------
+// PRECIPITACIÓ EN UNA FINESTRA TEMPORAL
+// ------------------------------------------------------------
+
+function calculateRainWindow(
+  history,
+  minutes
+) {
+
+  if (
+    history.length <
+    2
+  ) {
+
+    return null;
+
+  }
+
+
+  const latest =
+    history[
+      history.length - 1
+    ];
+
+
+  const targetEpoch =
+    latest.epoch -
+    (
+      minutes *
+      60 *
+      1000
+    );
+
+
+  const previous =
+    findHistoryPoint(
+      history,
+      targetEpoch
+    );
+
+
+  if (
+    !previous
+  ) {
+
+    return null;
+
+  }
+
+
+  const latestRain =
+    historyMedian(
+      latest
+    );
+
+
+  const previousRain =
+    historyMedian(
+      previous
+    );
+
+
+  if (
+    latestRain === null ||
+    previousRain === null
+  ) {
+
+    return null;
+
+  }
+
+
+  /*
+   * Diferència de precipitació
+   * acumulada.
+   *
+   * Protecció contra resets del
+   * comptador de precipitació.
+   */
+
+  let difference =
+    latestRain -
+    previousRain;
+
+
+  if (
+    difference < 0
+  ) {
+
+    difference = 0;
+
+  }
+
+
+  return {
+
+    minutes:
+      minutes,
+
+    mm:
+      Number(
+        difference.toFixed(
+          2
+        )
+      ),
+
+    start:
+      previous.epoch,
+
+    end:
+      latest.epoch
+
+  };
+
+}
+
+
+// ------------------------------------------------------------
+// INTENSITAT EQUIVALENT mm/h
+// ------------------------------------------------------------
+
+function calculateRainRate(
+  window
+) {
+
+  if (
+    !window ||
+    !window.minutes
+  ) {
+
+    return null;
+
+  }
+
+
+  return Number(
+
+    (
+      window.mm *
+      60 /
+      window.minutes
+
+    ).toFixed(
+      2
+    )
+
+  );
+
+}
+
+
+// ------------------------------------------------------------
+// TENDÈNCIA
+// ------------------------------------------------------------
+
+function calculateTrend(
+  history
+) {
+
+  if (
+    history.length <
+    3
+  ) {
+
+    return "unknown";
+
+  }
+
+
+  const last =
+    history[
+      history.length - 1
+    ];
+
+
+  const previous =
+    history[
+      history.length - 3
+    ];
+
+
+  const lastRain =
+    historyMedian(
+      last
+    );
+
+
+  const previousRain =
+    historyMedian(
+      previous
+    );
+
+
+  if (
+    lastRain === null ||
+    previousRain === null
+  ) {
+
+    return "unknown";
+
+  }
+
+
+  const difference =
+    lastRain -
+    previousRain;
+
+
+  if (
+    difference > 1
+  ) {
+
+    return "rising";
+
+  }
+
+
+  if (
+    difference < -1
+  ) {
+
+    return "falling";
+
+  }
+
+
+  return "stable";
+
+}
+
+// ============================================================
+// CLASSIFICACIÓ DE LA SITUACIÓ AL CARRER
+// ============================================================
+
+function calculateStreetSituation(
+  rain10,
+  rain30,
+  rain60,
+  rain180,
+  rain1440,
+  trend,
+  stations
+) {
+
+  let score = 0;
+
+
+  // ----------------------------------------------------------
+  // INTENSITAT 30 MIN
+  // ----------------------------------------------------------
+
+  if (
+    rain30 !== null
+  ) {
+
+    if (
+      rain30 >= 40
+    ) {
+
+      score += 5;
+
+    } else if (
+      rain30 >= 20
+    ) {
+
+      score += 4;
+
+    } else if (
+      rain30 >= 10
+    ) {
+
+      score += 2;
+
+    } else if (
+      rain30 >= 5
+    ) {
+
+      score += 1;
+
+    }
+
+  }
+
+
+  // ----------------------------------------------------------
+  // ACUMULACIÓ 1 HORA
+  // ----------------------------------------------------------
+
+  if (
+    rain60 !== null
+  ) {
+
+    if (
+      rain60 >= 80
+    ) {
+
+      score += 5;
+
+    } else if (
+      rain60 >= 40
+    ) {
+
+      score += 4;
+
+    } else if (
+      rain60 >= 20
+    ) {
+
+      score += 2;
+
+    } else if (
+      rain60 >= 10
+    ) {
+
+      score += 1;
+
+    }
+
+  }
+
+
+  // ----------------------------------------------------------
+  // ACUMULACIÓ 3 HORES
+  // ----------------------------------------------------------
+
+  if (
+    rain180 !== null
+  ) {
+
+    if (
+      rain180 >= 90
+    ) {
+
+      score += 5;
+
+    } else if (
+      rain180 >= 60
+    ) {
+
+      score += 4;
+
+    } else if (
+      rain180 >= 30
+    ) {
+
+      score += 2;
+
+    } else if (
+      rain180 >= 15
+    ) {
+
+      score += 1;
+
+    }
+
+  }
+
+
+  // ----------------------------------------------------------
+  // ACUMULACIÓ 24 HORES
+  // ----------------------------------------------------------
+
+  if (
+    rain1440 !== null
+  ) {
+
+    if (
+      rain1440 >= 200
+    ) {
+
+      score += 5;
+
+    } else if (
+      rain1440 >= 100
+    ) {
+
+      score += 4;
+
+    } else if (
+      rain1440 >= 50
+    ) {
+
+      score += 2;
+
+    } else if (
+      rain1440 >= 25
+    ) {
+
+      score += 1;
+
+    }
+
+  }
+
+
+  // ----------------------------------------------------------
+  // TENDÈNCIA
+  // ----------------------------------------------------------
+
+  if (
+    trend === "rising"
+  ) {
+
+    score += 1;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // QUANTES ESTACIONS ESTAN DETECTANT PLUJA?
+  // ----------------------------------------------------------
+
+  const validStations =
+    stations.filter(
+
+      station =>
+        station.ok === true &&
+        Number.isFinite(
+          station.rainToday
+        )
+
+    );
+
+
+  const rainStations =
+    validStations.filter(
+
+      station =>
+        station.rainToday > 0
+
+    );
+
+
+  const affectedPercentage =
+    validStations.length
+
+      ? (
+          rainStations.length /
+          validStations.length
+        ) * 100
+
+      : 0;
+
+
+  if (
+    affectedPercentage >= 80
+  ) {
+
+    score += 2;
+
+  } else if (
+    affectedPercentage >= 50
+  ) {
+
+    score += 1;
+
+  }
+
+
+  // ==========================================================
+  // CLASSIFICACIÓ
+  // ==========================================================
+
+  if (
+    score >= 14
+  ) {
+
+    return {
+
+      level:
+        4,
+
+      code:
+        "EXTREME",
+
+      label:
+        "RIUADA / SITUACIÓ EXTREMA",
+
+      shortLabel:
+        "RIUADA",
+
+      emoji:
+        "🟣",
+
+      score:
+        score,
+
+      message:
+        "Situació potencialment molt perillosa. Evita desplaçaments i zones inundables."
+
+    };
+
+  }
+
+
+  if (
+    score >= 10
+  ) {
+
+    return {
+
+      level:
+        3,
+
+      code:
+        "DANGER",
+
+      label:
+        "PERILL D'INUNDACIÓ",
+
+      shortLabel:
+        "PERILL",
+
+      emoji:
+        "🔴",
+
+      score:
+        score,
+
+      message:
+        "Risc elevat d'inundacions sobtades. Extrema la precaució al carrer."
+
+    };
+
+  }
+
+
+  if (
+    score >= 6
+  ) {
+
+    return {
+
+      level:
+        2,
+
+      code:
+        "LOCAL_FLOODING",
+
+      label:
+        "POSSIBLE INUNDACIÓ LOCAL",
+
+      shortLabel:
+        "PRECAUCIÓ",
+
+      emoji:
+        "🟠",
+
+      score:
+        score,
+
+      message:
+        "Pluja intensa. Es poden produir bassals importants i inundacions puntuals."
+
+    };
+
+  }
+
+
+  if (
+    score >= 3
+  ) {
+
+    return {
+
+      level:
+        1,
+
+      code:
+        "HEAVY_RAIN",
+
+      label:
+        "PLUJA INTENSA",
+
+      shortLabel:
+        "PLUJA INTENSA",
+
+      emoji:
+        "🟡",
+
+      score:
+        score,
+
+      message:
+        "Pluja intensa però sense indicadors suficients d'inundació generalitzada."
+
+    };
+
+  }
+
+
+  return {
+
+    level:
+      0,
+
+    code:
+      "NORMAL_RAIN",
+
+    label:
+      "PLUJA SENSE PERILL",
+
+    shortLabel:
+      "NORMAL",
+
+    emoji:
+      "🟢",
+
+    score:
+      score,
+
+    message:
+      "Pluja sense indicadors actuals de situació de perill."
+
+  };
+
+}
 
 // ============================================================
 // RESUM DE PRECIPITACIÓ
