@@ -1396,38 +1396,61 @@ async function addHistoryPoint(
 
   const point = {
 
-    timestamp:
-      new Date(
-        now
-      ).toISOString(),
+  timestamp:
+    new Date(
+      now
+    ).toISOString(),
 
-    epoch:
-      now,
+  epoch:
+    now,
 
-    stations:
-      stations.map(
-        station => ({
+  stations:
+    stations.map(
+      station => ({
 
-          id:
-            station.id,
+        id:
+          station.id,
 
-          name:
-            station.name,
+        name:
+          station.name,
 
-          source:
-            station.source,
+        source:
+          station.source,
 
-          rain:
-            Number.isFinite(
-              station.rainToday
-            )
-              ? station.rainToday
-              : null
+        priority:
+          station.priority ?? null,
 
-        })
-      )
+        ok:
+          station.ok === true,
 
-  };
+        rainToday:
+          Number.isFinite(
+            station.rainToday
+          )
+            ? station.rainToday
+            : null,
+
+        rainNow:
+          Number.isFinite(
+            station.rainNow
+          )
+            ? station.rainNow
+            : null,
+
+        rainrate:
+          Number.isFinite(
+            station.rainrate
+          )
+            ? station.rainrate
+            : null,
+
+        timestamp:
+          station.timestamp ?? null
+
+      })
+    )
+
+};
 
 
   history.push(
@@ -1566,6 +1589,187 @@ function findHistoryPoint(
 
 }
 
+// ============================================================
+// PRECIPITACIÓ PER ESTACIÓ
+// ============================================================
+
+function calculateStationRainWindow(
+  history,
+  minutes
+) {
+
+  if (
+    history.length < 2
+  ) {
+
+    return [];
+
+  }
+
+
+  const latest =
+    history[
+      history.length - 1
+    ];
+
+
+  const targetEpoch =
+    latest.epoch -
+    (
+      minutes *
+      60 *
+      1000
+    );
+
+
+  const previous =
+    findHistoryPoint(
+      history,
+      targetEpoch
+    );
+
+
+  if (
+    !previous
+  ) {
+
+    return [];
+
+  }
+
+
+  const previousMap =
+    new Map();
+
+
+  for (
+    const station of previous.stations || []
+  ) {
+
+    previousMap.set(
+      `${station.source}:${station.id}`,
+      station
+    );
+
+  }
+
+
+  const results = [];
+
+
+  for (
+    const station of latest.stations || []
+  ) {
+
+    const key =
+      `${station.source}:${station.id}`;
+
+
+    const oldStation =
+      previousMap.get(
+        key
+      );
+
+
+    if (
+      !oldStation
+    ) {
+
+      continue;
+
+    }
+
+
+    const currentRain =
+      Number.isFinite(
+        station.rainToday
+      )
+        ? station.rainToday
+        : null;
+
+
+    const previousRain =
+      Number.isFinite(
+        oldStation.rainToday
+      )
+        ? oldStation.rainToday
+        : null;
+
+
+    if (
+      currentRain === null ||
+      previousRain === null
+    ) {
+
+      continue;
+
+    }
+
+
+    let rain =
+      currentRain -
+      previousRain;
+
+
+    // Protecció contra el reinici del comptador diari
+    if (
+      rain < 0
+    ) {
+
+      rain = 0;
+
+    }
+
+
+    results.push({
+
+      id:
+        station.id,
+
+      name:
+        station.name,
+
+      source:
+        station.source,
+
+      priority:
+        station.priority ?? null,
+
+      rain:
+        Number(
+          rain.toFixed(
+            2
+          )
+        ),
+
+      mmPerHour:
+        Number(
+          (
+            rain *
+            60 /
+            minutes
+          ).toFixed(
+            2
+          )
+        ),
+
+      currentRainToday:
+        currentRain,
+
+      previousRainToday:
+        previousRain,
+
+      timestamp:
+        station.timestamp ?? null
+
+    });
+
+  }
+
+
+  return results;
+
+}
 
 // ------------------------------------------------------------
 // PRECIPITACIÓ EN UNA FINESTRA TEMPORAL
@@ -1794,6 +1998,221 @@ function calculateTrend(
 
 
   return "stable";
+
+}
+
+// ============================================================
+// SITUACIÓ PER ZONA
+// ============================================================
+
+function calculateZoneSituation(
+  rain10,
+  rain30,
+  rain60,
+  rain180
+) {
+
+  const r10 =
+    rain10 ?? 0;
+
+  const r30 =
+    rain30 ?? 0;
+
+  const r60 =
+    rain60 ?? 0;
+
+  const r180 =
+    rain180 ?? 0;
+
+
+  let score = 0;
+
+
+  // ----------------------------------------------------------
+  // 10 MINUTS
+  // ----------------------------------------------------------
+
+  if (r10 >= 20) {
+
+    score += 5;
+
+  } else if (r10 >= 10) {
+
+    score += 4;
+
+  } else if (r10 >= 5) {
+
+    score += 2;
+
+  } else if (r10 >= 2) {
+
+    score += 1;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // 30 MINUTS
+  // ----------------------------------------------------------
+
+  if (r30 >= 30) {
+
+    score += 5;
+
+  } else if (r30 >= 20) {
+
+    score += 4;
+
+  } else if (r30 >= 10) {
+
+    score += 2;
+
+  } else if (r30 >= 5) {
+
+    score += 1;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // 1 HORA
+  // ----------------------------------------------------------
+
+  if (r60 >= 50) {
+
+    score += 5;
+
+  } else if (r60 >= 30) {
+
+    score += 4;
+
+  } else if (r60 >= 20) {
+
+    score += 2;
+
+  } else if (r60 >= 10) {
+
+    score += 1;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // 3 HORES
+  // ----------------------------------------------------------
+
+  if (r180 >= 80) {
+
+    score += 5;
+
+  } else if (r180 >= 50) {
+
+    score += 4;
+
+  } else if (r180 >= 30) {
+
+    score += 2;
+
+  } else if (r180 >= 15) {
+
+    score += 1;
+
+  }
+
+
+  // ==========================================================
+  // RESULTAT
+  // ==========================================================
+
+  if (score >= 14) {
+
+    return {
+
+      level: 4,
+
+      code: "FLOOD",
+
+      label: "RIUADA",
+
+      emoji: "🟣",
+
+      score: score
+
+    };
+
+  }
+
+
+  if (score >= 10) {
+
+    return {
+
+      level: 3,
+
+      code: "DANGER",
+
+      label: "PERILL D'INUNDACIÓ",
+
+      emoji: "🔴",
+
+      score: score
+
+    };
+
+  }
+
+
+  if (score >= 6) {
+
+    return {
+
+      level: 2,
+
+      code: "LOCAL",
+
+      label: "POSSIBLE INUNDACIÓ LOCAL",
+
+      emoji: "🟠",
+
+      score: score
+
+    };
+
+  }
+
+
+  if (score >= 3) {
+
+    return {
+
+      level: 1,
+
+      code: "HEAVY_RAIN",
+
+      label: "PLUJA INTENSA",
+
+      emoji: "🟡",
+
+      score: score
+
+    };
+
+  }
+
+
+  return {
+
+    level: 0,
+
+    code: "NORMAL",
+
+    label: "PLUJA SENSE PERILL",
+
+    emoji: "🟢",
+
+    score: score
+
+  };
 
 }
 
@@ -2587,39 +3006,296 @@ export default {
         stations
       );
 
+    // ========================================================
+// HISTÒRIC
+// ========================================================
 
-    return json({
+const history =
+  await addHistoryPoint(
+    env,
+    stations
+  );
 
-      ok:
-        true,
 
-      updated:
-        new Date().toISOString(),
+// ========================================================
+// PRECIPITACIÓ PER ZONA
+// ========================================================
 
-      summary:
-        summary,
+const rain10Zones =
+  calculateStationRainWindow(
+    history,
+    10
+  );
 
-      stations:
-        stations,
+const rain30Zones =
+  calculateStationRainWindow(
+    history,
+    30
+  );
 
-      sources: {
+const rain60Zones =
+  calculateStationRainWindow(
+    history,
+    60
+  );
 
-        Meteoclimatic:
-          meteoclimatic.length,
+const rain180Zones =
+  calculateStationRainWindow(
+    history,
+    180
+  );
 
-        Weathercloud:
-          weathercloud.length,
 
-        Meteocat:
-          CONFIG.optionalApis,
+// ========================================================
+// CONSTRUIR ZONES
+// ========================================================
 
-        AEMET:
-          CONFIG.optionalApis
+const zoneMap =
+  new Map();
 
-      }
 
-    });
+for (
+  const station of stations
+) {
+
+  const key =
+    `${station.source}:${station.id}`;
+
+
+  zoneMap.set(
+    key,
+    {
+
+      id:
+        station.id,
+
+      name:
+        station.name,
+
+      source:
+        station.source,
+
+      priority:
+        station.priority ?? null,
+
+      rain10min:
+        0,
+
+      rain30min:
+        0,
+
+      rain1h:
+        0,
+
+      rain3h:
+        0,
+
+      situation:
+        calculateZoneSituation(
+          0,
+          0,
+          0,
+          0
+        )
+
+    }
+  );
+
+}
+
+
+// ========================================================
+// INCORPORAR 10 MIN
+// ========================================================
+
+for (
+  const zone of rain10Zones
+) {
+
+  const key =
+    `${zone.source}:${zone.id}`;
+
+  const target =
+    zoneMap.get(
+      key
+    );
+
+  if (
+    target
+  ) {
+
+    target.rain10min =
+      zone.rain;
 
   }
 
-};
+}
+
+
+// ========================================================
+// INCORPORAR 30 MIN
+// ========================================================
+
+for (
+  const zone of rain30Zones
+) {
+
+  const key =
+    `${zone.source}:${zone.id}`;
+
+  const target =
+    zoneMap.get(
+      key
+    );
+
+  if (
+    target
+  ) {
+
+    target.rain30min =
+      zone.rain;
+
+  }
+
+}
+
+
+// ========================================================
+// INCORPORAR 1 HORA
+// ========================================================
+
+for (
+  const zone of rain60Zones
+) {
+
+  const key =
+    `${zone.source}:${zone.id}`;
+
+  const target =
+    zoneMap.get(
+      key
+    );
+
+  if (
+    target
+  ) {
+
+    target.rain1h =
+      zone.rain;
+
+  }
+
+}
+
+
+// ========================================================
+// INCORPORAR 3 HORES
+// ========================================================
+
+for (
+  const zone of rain180Zones
+) {
+
+  const key =
+    `${zone.source}:${zone.id}`;
+
+  const target =
+    zoneMap.get(
+      key
+    );
+
+  if (
+    target
+  ) {
+
+    target.rain3h =
+      zone.rain;
+
+  }
+
+}
+
+
+// ========================================================
+// CALCULAR SITUACIÓ FINAL DE CADA ZONA
+// ========================================================
+
+for (
+  const zone of zoneMap.values()
+) {
+
+  zone.situation =
+    calculateZoneSituation(
+
+      zone.rain10min,
+
+      zone.rain30min,
+
+      zone.rain1h,
+
+      zone.rain3h
+
+    );
+
+}
+
+
+// ========================================================
+// CONVERTIR MAP -> ARRAY
+// ========================================================
+
+const zones =
+  Array.from(
+    zoneMap.values()
+  );
+
+    return json({
+
+  ok:
+    true,
+
+  updated:
+    new Date().toISOString(),
+
+  summary:
+    summary,
+
+  zones:
+    zones,
+
+  precipitation: {
+
+    rain10min:
+      rain10Zones,
+
+    rain30min:
+      rain30Zones,
+
+    rain1h:
+      rain60Zones,
+
+    rain3h:
+      rain180Zones
+
+  },
+
+  stations:
+    stations,
+
+  sources: {
+
+    Meteoclimatic:
+      meteoclimatic.length,
+
+    Weathercloud:
+      weathercloud.length,
+
+    Meteocat:
+      CONFIG.optionalApis,
+
+    AEMET:
+      CONFIG.optionalApis
+
+  }
+
+});
