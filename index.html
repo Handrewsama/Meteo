@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meteo Badalona</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#071321;color:#eef6ff}
+main{max-width:1100px;margin:auto;padding:20px}
+header{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:18px}
+h1{margin:0;font-size:28px}.sub{opacity:.65;margin-top:4px}
+button{border:0;border-radius:10px;padding:10px 14px;background:#23618f;color:white;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.card{background:#10243a;border:1px solid #294861;border-radius:15px;padding:16px}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.6}
+.value{font-size:32px;font-weight:700;margin-top:6px}
+.small{font-size:13px;opacity:.65}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{text-align:left;padding:10px;border-bottom:1px solid #294861}
+th{font-size:11px;opacity:.6;text-transform:uppercase}
+.good{color:#73e6a2}.warn{color:#ffd479}.bad{color:#ff9696}
+#status{margin:10px 0;padding:10px;border-radius:10px;background:#0c1c2d}
+footer{margin-top:18px;font-size:12px;opacity:.5}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.grid{grid-template-columns:1fr}header{align-items:flex-start}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div>
+<h1>🌧️ Meteo Badalona</h1>
+<div class="sub">Precipitació · estacions públiques</div>
+</div>
+<button onclick="loadData()">↻ Actualitzar</button>
+</header>
+
+<div id="status">Preparat. Encara no hi ha backend connectat.</div>
+
+<section class="grid">
+<div class="card"><div class="label">Intensitat actual</div><div class="value" id="rainrate">—</div><div class="small">mm/h</div></div>
+<div class="card"><div class="label">Pluja avui</div><div class="value" id="rain">—</div><div class="small">mm</div></div>
+<div class="card"><div class="label">Estacions</div><div class="value" id="stations">—</div><div class="small">amb dades</div></div>
+<div class="card"><div class="label">Última lectura</div><div class="value" id="updated">—</div><div class="small">hora local</div></div>
+</section>
+
+<div class="card" style="margin-top:12px">
+<div class="label">Estacions de precipitació</div>
+<table>
+<thead><tr><th>Estació</th><th>Intensitat</th><th>Avui</th><th>Actualització</th><th>Estat</th></tr></thead>
+<tbody id="table"><tr><td colspan="5">Esperant el backend...</td></tr></tbody>
+</table>
+</div>
+
+<footer>
+Dashboard preparat per connectar-se al backend de dades obertes.
+No conté cap API key ni credencial privada.
+</footer>
+</main>
+
+<script>
+/*
+  QUAN CREAM EL CLOUDFLARE WORKER:
+  canvia API_URL per la URL del Worker.
+
+  Exemple:
+  const API_URL="https://badalona-meteo.teu-subdomini.workers.dev";
+*/
+const API_URL="";
+
+function fmtTime(value){
+  if(!value)return "—";
+  const d=new Date(value);
+  return isNaN(d)?"—":d.toLocaleTimeString("ca-ES",{hour:"2-digit",minute:"2-digit"});
+}
+
+function classify(v){
+  if(v===null||v===undefined||isNaN(v))return ["Sense dades","bad"];
+  if(v<=0)return ["Sec","good"];
+  if(v<2)return ["Pluja feble","good"];
+  if(v<10)return ["Pluja moderada","warn"];
+  return ["Pluja intensa","bad"];
+}
+
+async function loadData(){
+  const status=document.getElementById("status");
+  if(!API_URL){
+    status.textContent="El dashboard està correcte. Falta connectar el Cloudflare Worker.";
+    return;
+  }
+
+  status.textContent="Consultant dades...";
+  try{
+    const r=await fetch(API_URL,{cache:"no-store"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const data=await r.json();
+
+    const list=data.stations||[];
+    const valid=list.filter(x=>Number.isFinite(Number(x.rainrate)));
+
+    document.getElementById("stations").textContent=valid.length;
+
+    if(data.summary){
+      document.getElementById("rainrate").textContent=
+        Number(data.summary.rainrate).toFixed(1);
+      document.getElementById("rain").textContent=
+        Number(data.summary.rain).toFixed(1);
+    }
+
+    const latest=list.map(x=>x.timestamp).filter(Boolean).sort().pop();
+    document.getElementById("updated").textContent=fmtTime(latest);
+
+    document.getElementById("table").innerHTML=list.map(x=>{
+      const rr=Number(x.rainrate);
+      const [label,cls]=classify(rr);
+      return `<tr>
+        <td>${x.name||x.id||"—"}</td>
+        <td>${Number.isFinite(rr)?rr.toFixed(1)+" mm/h":"—"}</td>
+        <td>${Number.isFinite(Number(x.rain))?Number(x.rain).toFixed(1)+" mm":"—"}</td>
+        <td>${fmtTime(x.timestamp)}</td>
+        <td class="${cls}">${label}</td>
+      </tr>`;
+    }).join("");
+
+    status.textContent="Dades actualitzades correctament.";
+  }catch(e){
+    status.textContent="No s'han pogut consultar les dades: "+e.message;
+  }
+}
+</script>
+</body>
+</html>
