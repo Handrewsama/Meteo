@@ -1,60 +1,34 @@
 /*
- * METEO BADALONA - AGREGADOR
+ * METEO BADALONA API
+ * Cloudflare Worker
  *
  * Fonts:
- *   1. Meteoclimatic - estacions públiques
- *   2. Meteocat/XEMA - opcional amb API Key
- *   3. AEMET - opcional amb API Key
- *   4. Weathercloud - fallback
- *
- * Endpoints:
- *
- *   /
- *       Resum complet
- *
- *   /stations
- *       Totes les estacions
- *
- *   /diagnostic
- *       Estat detallat de totes les fonts
- *
- *   /source/meteoclimatic
- *       Només Meteoclimatic
- *
- *   /source/meteocat
- *       Només Meteocat
- *
- *   /source/aemet
- *       Només AEMET
- *
- *   /source/weathercloud
- *       Només Weathercloud
+ * - Meteoclimatic
+ * - Weathercloud
+ * - Meteocat (opcional)
+ * - AEMET (opcional)
  */
 
 const CONFIG = {
-
-  // ----------------------------------------------------
-  // Meteoclimatic
-  // ----------------------------------------------------
 
   meteoclimatic: [
 
     {
       id: "ESCAT0800000008912A",
       name: "Badalona Centre",
-      priority: 3
+      priority: 5
     },
 
     {
       id: "ESCAT0800000008912B",
       name: "Badalona Progrés",
-      priority: 3
+      priority: 5
     },
 
     {
       id: "ESCAT0800000008915A",
       name: "Badalona Bufalà",
-      priority: 3
+      priority: 5
     },
 
     {
@@ -72,14 +46,17 @@ const CONFIG = {
     {
       id: "ESCAT0800000008913B",
       name: "Badalona S. Antoni Llefià",
-      priority: 3
+      priority: 4
+    },
+
+    {
+      id: "ESCAT0800000008911C",
+      name: "Badalona Dalt la Vila",
+      priority: 2
     }
 
   ],
 
-  // ----------------------------------------------------
-  // Weathercloud
-  // ----------------------------------------------------
 
   weathercloud: [
 
@@ -105,11 +82,6 @@ const CONFIG = {
 
   ],
 
-  // ----------------------------------------------------
-  // Meteocat
-  //
-  // Badalona - Museu
-  // ----------------------------------------------------
 
   meteocat: {
 
@@ -119,46 +91,15 @@ const CONFIG = {
 
   },
 
-  // ----------------------------------------------------
-  // Qualitat
-  // ----------------------------------------------------
 
-  maxAgeMinutes: 45,
-
-  // Si true, intenta utilitzar fonts opcionals
-  // que necessiten API keys.
   optionalApis: false
 
 };
 
 
-// ======================================================
-// UTILITATS
-// ======================================================
-
-function median(values) {
-
-  const valid = values
-    .filter(v => Number.isFinite(v))
-    .sort((a, b) => a - b);
-
-  if (!valid.length) {
-    return null;
-  }
-
-  const middle =
-    Math.floor(valid.length / 2);
-
-  if (valid.length % 2) {
-    return valid[middle];
-  }
-
-  return (
-    valid[middle - 1] +
-    valid[middle]
-  ) / 2;
-}
-
+// ============================================================
+// RESPOSTA JSON
+// ============================================================
 
 function json(data, status = 200) {
 
@@ -172,7 +113,7 @@ function json(data, status = 200) {
 
     {
 
-      status,
+      status: status,
 
       headers: {
 
@@ -180,7 +121,7 @@ function json(data, status = 200) {
           "application/json; charset=utf-8",
 
         "Cache-Control":
-          "no-store",
+          "no-store, no-cache, must-revalidate",
 
         "Access-Control-Allow-Origin":
           "*",
@@ -200,43 +141,405 @@ function json(data, status = 200) {
 }
 
 
+// ============================================================
+// CONVERSIÓ A NÚMERO
+// ============================================================
+
 function parseNumber(value) {
 
   if (
     value === null ||
     value === undefined
   ) {
+
     return null;
+
   }
 
-  const number =
-    Number(
-      String(value)
-        .replace(",", ".")
-        .replace(/[^\d.-]/g, "")
-    );
 
-  return Number.isFinite(number)
-    ? number
+  const cleaned =
+
+    String(value)
+
+      .replace(",", ".")
+
+      .replace(/[^\d.-]/g, "");
+
+
+  const result =
+    Number(cleaned);
+
+
+  return Number.isFinite(result)
+    ? result
     : null;
+
 }
 
 
-// ======================================================
+// ============================================================
+// NETEJA HTML
+// ============================================================
+
+function cleanHtml(html) {
+
+  return html
+
+    .replace(
+      /<script[\s\S]*?<\/script>/gi,
+      " "
+    )
+
+    .replace(
+      /<style[\s\S]*?<\/style>/gi,
+      " "
+    )
+
+    .replace(
+      /<noscript[\s\S]*?<\/noscript>/gi,
+      " "
+    )
+
+    .replace(
+      /<br\s*\/?>/gi,
+      " "
+    )
+
+    .replace(
+      /<\/td>/gi,
+      " "
+    )
+
+    .replace(
+      /<\/th>/gi,
+      " "
+    )
+
+    .replace(
+      /<\/tr>/gi,
+      " "
+    )
+
+    .replace(
+      /<[^>]+>/g,
+      " "
+    )
+
+    .replace(
+      /&nbsp;/gi,
+      " "
+    )
+
+    .replace(
+      /&ordm;/gi,
+      "º"
+    )
+
+    .replace(
+      /&aacute;/gi,
+      "á"
+    )
+
+    .replace(
+      /&eacute;/gi,
+      "é"
+    )
+
+    .replace(
+      /&iacute;/gi,
+      "í"
+    )
+
+    .replace(
+      /&oacute;/gi,
+      "ó"
+    )
+
+    .replace(
+      /&uacute;/gi,
+      "ú"
+    )
+
+    .replace(
+      /&ntilde;/gi,
+      "ñ"
+    )
+
+    .replace(
+      /&#39;/gi,
+      "'"
+    )
+
+    .replace(
+      /&quot;/gi,
+      '"'
+    )
+
+    .replace(
+      /&amp;/gi,
+      "&"
+    )
+
+    .replace(
+      /\s+/g,
+      " "
+    )
+
+    .trim();
+
+}
+
+
+// ============================================================
+// PRECIPITACIÓ D'AVUI
+// ============================================================
+
+function extractRainToday(clean) {
+
+  const precipIndex =
+    clean.search(
+      /Precip\./i
+    );
+
+
+  if (
+    precipIndex < 0
+  ) {
+
+    return null;
+
+  }
+
+
+  const section =
+    clean.substring(
+      precipIndex,
+      precipIndex + 1800
+    );
+
+
+  /*
+   * Primer intent:
+   *
+   * buscar directament un valor
+   * associat a "Hoy".
+   */
+
+  const hoyMatches = [
+
+    ...section.matchAll(
+
+      /\bHoy\b[\s\S]{0,120}?(\d+(?:[.,]\d+)?)\s*(?:mm)?/gi
+
+    )
+
+  ];
+
+
+  if (
+    hoyMatches.length
+  ) {
+
+    const candidate =
+      hoyMatches[
+        hoyMatches.length - 1
+      ][1];
+
+
+    const value =
+      parseNumber(
+        candidate
+      );
+
+
+    if (
+      value !== null
+    ) {
+
+      return value;
+
+    }
+
+  }
+
+
+  /*
+   * Segon intent:
+   *
+   * agafem el bloc entre l'últim
+   * "Hoy" i "Mes".
+   */
+
+  const hoyPositions = [
+
+    ...section.matchAll(
+      /\bHoy\b/gi
+    )
+
+  ];
+
+
+  const lastHoy =
+
+    hoyPositions.length
+
+      ? hoyPositions[
+          hoyPositions.length - 1
+        ].index
+
+      : -1;
+
+
+  if (
+    lastHoy >= 0
+  ) {
+
+    const afterHoy =
+      section.substring(
+        lastHoy
+      );
+
+
+    const mesIndex =
+      afterHoy.search(
+        /\bMes\b/i
+      );
+
+
+    if (
+      mesIndex >= 0
+    ) {
+
+      const block =
+        afterHoy.substring(
+          0,
+          mesIndex
+        );
+
+
+      const numbers =
+        block.match(
+          /\d+(?:[.,]\d+)?/g
+        );
+
+
+      if (
+        numbers &&
+        numbers.length
+      ) {
+
+        return parseNumber(
+          numbers[
+            numbers.length - 1
+          ]
+        );
+
+      }
+
+    }
+
+  }
+
+
+  return null;
+
+}
+
+
+// ============================================================
+// PRECIPITACIÓ ACTUAL
+// ============================================================
+
+function extractRainNow(clean) {
+
+  const index =
+    clean.search(
+      /Precip\./i
+    );
+
+
+  if (
+    index < 0
+  ) {
+
+    return null;
+
+  }
+
+
+  const section =
+    clean.substring(
+      index,
+      index + 500
+    );
+
+
+  const match =
+    section.match(
+
+      /Precip\.\s*(?:Dias\s+Sequia\s*)?(\d+(?:[.,]\d+)?)/i
+
+    );
+
+
+  if (
+    !match
+  ) {
+
+    return null;
+
+  }
+
+
+  return parseNumber(
+    match[1]
+  );
+
+}
+// ============================================================
+// HORA D'ACTUALITZACIÓ
+// ============================================================
+
+function extractUpdate(clean) {
+
+  const match =
+    clean.match(
+
+      /Última actualización\s+(\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}:\d{2})\s*UTC/i
+
+    );
+
+
+  if (
+    match
+  ) {
+
+    return match[1] + " UTC";
+
+  }
+
+
+  return null;
+
+}
+
+
+// ============================================================
 // METEOCLIMATIC
-// ======================================================
+// ============================================================
 
 async function getMeteoclimatic() {
 
   const results = [];
 
+
   for (
-    const station
-    of CONFIG.meteoclimatic
+    const station of CONFIG.meteoclimatic
   ) {
 
     const url =
       `https://www.meteoclimatic.net/perfil/${station.id}`;
+
 
     try {
 
@@ -250,10 +553,10 @@ async function getMeteoclimatic() {
             headers: {
 
               "User-Agent":
-                "Mozilla/5.0",
+                "Mozilla/5.0 (compatible; BadalonaMeteo/1.0)",
 
               "Accept":
-                "text/html"
+                "text/html,application/xhtml+xml"
 
             }
 
@@ -262,7 +565,9 @@ async function getMeteoclimatic() {
         );
 
 
-      if (!response.ok) {
+      if (
+        !response.ok
+      ) {
 
         results.push({
 
@@ -292,104 +597,57 @@ async function getMeteoclimatic() {
         await response.text();
 
 
-      /*
-       * Meteoclimatic mostra actualment
-       * la precipitació dins de la fitxa.
-       *
-       * Busquem primer el text
-       * "Precip." i els valors
-       * immediatament posteriors.
-       */
+      if (
+        !html ||
+        html.length < 100
+      ) {
+
+        results.push({
+
+          source:
+            "Meteoclimatic",
+
+          id:
+            station.id,
+
+          name:
+            station.name,
+
+          ok:
+            false,
+
+          error:
+            "HTML buit o massa curt"
+
+        });
+
+        continue;
+
+      }
+
 
       const clean =
-        html
-          .replace(/<script[\s\S]*?<\/script>/gi, " ")
-          .replace(/<style[\s\S]*?<\/style>/gi, " ")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ");
-
-
-      let rain = null;
-
-
-      /*
-       * Intent 1:
-       * Precip. ... valor actual
-       */
-
-      let match =
-        clean.match(
-          /Precip\.?\s+[\s\S]{0,500}?(\d+(?:[.,]\d+)?)\s*mm/i
+        cleanHtml(
+          html
         );
 
 
-      if (match) {
-
-        rain =
-          parseNumber(match[1]);
-
-      }
-
-
-      /*
-       * Intent 2:
-       * Buscar "Hoy" després de Precip.
-       */
-
-      if (rain === null) {
-
-        const index =
-          clean.search(
-            /Precip\./i
-          );
-
-        if (index >= 0) {
-
-          const section =
-            clean.substring(
-              index,
-              index + 1200
-            );
-
-          const numbers =
-            section.match(
-              /\d+(?:[.,]\d+)?/g
-            );
-
-          if (
-            numbers &&
-            numbers.length
-          ) {
-
-            rain =
-              parseNumber(
-                numbers[0]
-              );
-
-          }
-
-        }
-
-      }
-
-
-      /*
-       * Última actualització
-       */
-
-      let timestamp = null;
-
-      const update =
-        clean.match(
-          /Última actualización\s+([^<]{0,100})/i
+      const rainToday =
+        extractRainToday(
+          clean
         );
 
-      if (update) {
 
-        timestamp =
-          update[1].trim();
+      const rainNow =
+        extractRainNow(
+          clean
+        );
 
-      }
+
+      const timestamp =
+        extractUpdate(
+          clean
+        );
 
 
       results.push({
@@ -406,13 +664,14 @@ async function getMeteoclimatic() {
         ok:
           true,
 
-        rain:
-          rain,
+        rainToday:
+          rainToday,
 
-        /*
-         * Meteoclimatic no sempre exposa
-         * rainrate de forma pública.
-         */
+        rainNow:
+          rainNow,
+
+        rain:
+          rainToday,
 
         rainrate:
           null,
@@ -424,7 +683,10 @@ async function getMeteoclimatic() {
           station.priority,
 
         rawAvailable:
-          html.length > 0
+          true,
+
+        parser:
+          "meteoclimatic-v3"
 
       });
 
@@ -460,9 +722,9 @@ async function getMeteoclimatic() {
 }
 
 
-// ======================================================
+// ============================================================
 // WEATHERCloud
-// ======================================================
+// ============================================================
 
 async function getWeathercloud() {
 
@@ -470,8 +732,7 @@ async function getWeathercloud() {
 
 
   for (
-    const station
-    of CONFIG.weathercloud
+    const station of CONFIG.weathercloud
   ) {
 
     try {
@@ -505,16 +766,6 @@ async function getWeathercloud() {
       const text =
         await response.text();
 
-
-      /*
-       * Weathercloud ens està retornant
-       * actualment una resposta HTML buida
-       * des de Cloudflare.
-       *
-       * No provoquem error.
-       * Simplement marquem la font
-       * com unavailable.
-       */
 
       if (
         !text ||
@@ -550,10 +801,13 @@ async function getWeathercloud() {
 
       let data;
 
+
       try {
 
         data =
-          JSON.parse(text);
+          JSON.parse(
+            text
+          );
 
       } catch {
 
@@ -608,10 +862,19 @@ async function getWeathercloud() {
           true,
 
         rain:
-          parseNumber(data.rain),
+          parseNumber(
+            data.rain
+          ),
+
+        rainToday:
+          parseNumber(
+            data.rain
+          ),
 
         rainrate:
-          parseNumber(data.rainrate),
+          parseNumber(
+            data.rainrate
+          ),
 
         timestamp:
           epoch
@@ -620,7 +883,8 @@ async function getWeathercloud() {
               ).toISOString()
             : null,
 
-        epoch
+        epoch:
+          epoch
 
       });
 
@@ -657,22 +921,11 @@ async function getWeathercloud() {
   return results;
 
 }
-
-
-// ======================================================
+// ============================================================
 // METEOCAT
-// ======================================================
+// ============================================================
 
 async function getMeteocat(env) {
-
-  /*
-   * L'API oficial XEMA requereix
-   * subscripció/API key.
-   *
-   * La deixem preparada però
-   * desactivada fins que hi hagi
-   * una credencial configurada.
-   */
 
   if (
     !CONFIG.optionalApis
@@ -701,7 +954,9 @@ async function getMeteocat(env) {
     env.METEOCAT_API_KEY;
 
 
-  if (!apiKey) {
+  if (
+    !apiKey
+  ) {
 
     return {
 
@@ -735,19 +990,20 @@ async function getMeteocat(env) {
     const month =
       String(
         now.getUTCMonth() + 1
-      ).padStart(2, "0");
+      ).padStart(
+        2,
+        "0"
+      );
 
 
     const day =
       String(
         now.getUTCDate()
-      ).padStart(2, "0");
+      ).padStart(
+        2,
+        "0"
+      );
 
-
-    /*
-     * Variable 30 =
-     * precipitació.
-     */
 
     const url =
       `https://api.meteo.cat/xema/v1/variables/mesurades/30/${year}/${month}/${day}?codiEstacio=${CONFIG.meteocat.station}`;
@@ -775,7 +1031,9 @@ async function getMeteocat(env) {
       );
 
 
-    if (!response.ok) {
+    if (
+      !response.ok
+    ) {
 
       return {
 
@@ -806,19 +1064,21 @@ async function getMeteocat(env) {
 
     const valid =
       readings
+
         .filter(
-          r =>
-            r.estat !== "N"
+          reading =>
+            reading.estat !== "N"
         )
+
         .map(
-          r => ({
+          reading => ({
 
             timestamp:
-              r.data,
+              reading.data,
 
             rain:
               parseNumber(
-                r.valor
+                reading.valor
               )
 
           })
@@ -827,7 +1087,9 @@ async function getMeteocat(env) {
 
     const latest =
       valid.length
-        ? valid[valid.length - 1]
+        ? valid[
+            valid.length - 1
+          ]
         : null;
 
 
@@ -839,6 +1101,9 @@ async function getMeteocat(env) {
       station:
         CONFIG.meteocat.station,
 
+      name:
+        "Badalona - Museu",
+
       ok:
         true,
 
@@ -846,6 +1111,11 @@ async function getMeteocat(env) {
         true,
 
       rain:
+        latest
+          ? latest.rain
+          : null,
+
+      rainToday:
         latest
           ? latest.rain
           : null,
@@ -884,17 +1154,11 @@ async function getMeteocat(env) {
 }
 
 
-// ======================================================
+// ============================================================
 // AEMET
-// ======================================================
+// ============================================================
 
 async function getAemet(env) {
-
-  /*
-   * AEMET necessita API Key.
-   *
-   * La deixem com a connector opcional.
-   */
 
   if (
     !CONFIG.optionalApis
@@ -954,83 +1218,150 @@ async function getAemet(env) {
       true,
 
     reason:
-      "Connector preparat; cal configurar estació AEMET"
+      "Connector preparat"
 
   };
 
 }
 
 
-// ======================================================
-// AGREGACIÓ
-// ======================================================
+// ============================================================
+// MEDIANA
+// ============================================================
+
+function median(values) {
+
+  const valid =
+    values
+
+      .filter(
+        value =>
+          Number.isFinite(
+            value
+          )
+      )
+
+      .sort(
+        (a, b) =>
+          a - b
+      );
+
+
+  if (
+    !valid.length
+  ) {
+
+    return null;
+
+  }
+
+
+  const middle =
+    Math.floor(
+      valid.length / 2
+    );
+
+
+  if (
+    valid.length % 2
+  ) {
+
+    return valid[
+      middle
+    ];
+
+  }
+
+
+  return (
+
+    valid[
+      middle - 1
+    ] +
+
+    valid[
+      middle
+    ]
+
+  ) / 2;
+
+}
+
+
+// ============================================================
+// RESUM DE PRECIPITACIÓ
+// ============================================================
 
 function calculateSummary(stations) {
 
-  /*
-   * Només dades que tinguin
-   * precipitació numèrica.
-   */
-
   const valid =
     stations.filter(
-      s =>
-        s.ok &&
+
+      station =>
+
+        station.ok === true &&
+
         Number.isFinite(
-          s.rain
+          station.rainToday
         )
+
     );
 
 
   const values =
     valid.map(
-      s => s.rain
+
+      station =>
+        station.rainToday
+
     );
-
-
-  /*
-   * IMPORTANT:
-   *
-   * rain pot significar:
-   *
-   * - acumulat avui
-   * - precipitació actual
-   *
-   * segons la font.
-   *
-   * Per això no els barregem
-   * cegament.
-   */
 
 
   return {
 
-    stationCount:
+    stationsTotal:
       stations.length,
 
-    validStationCount:
+    stationsValid:
       valid.length,
 
-    medianRain:
-      median(values),
+    rainTodayMedian:
+      median(
+        values
+      ),
+
+    rainTodayMin:
+      values.length
+        ? Math.min(
+            ...values
+          )
+        : null,
+
+    rainTodayMax:
+      values.length
+        ? Math.max(
+            ...values
+          )
+        : null,
 
     sources:
       [
         ...new Set(
+
           valid.map(
-            s => s.source
+            station =>
+              station.source
           )
+
         )
       ]
 
   };
 
 }
-
-
-// ======================================================
-// WORKER
-// ======================================================
+// ============================================================
+// WORKER PRINCIPAL
+// ============================================================
 
 export default {
 
@@ -1039,8 +1370,13 @@ export default {
     env
   ) {
 
+    // --------------------------------------------------------
+    // CORS
+    // --------------------------------------------------------
+
     if (
-      request.method === "OPTIONS"
+      request.method ===
+      "OPTIONS"
     ) {
 
       return json(
@@ -1051,20 +1387,29 @@ export default {
     }
 
 
+    // --------------------------------------------------------
+    // NOMÉS GET
+    // --------------------------------------------------------
+
     if (
-      request.method !== "GET"
+      request.method !==
+      "GET"
     ) {
 
       return json(
+
         {
+
           ok:
             false,
 
           error:
             "Only GET supported"
+
         },
 
         405
+
       );
 
     }
@@ -1076,11 +1421,9 @@ export default {
       );
 
 
-    /*
-     * --------------------------------------------------
-     * DIAGNOSTIC
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // DIAGNOSTIC
+    // ========================================================
 
     if (
       url.pathname ===
@@ -1088,12 +1431,19 @@ export default {
     ) {
 
       const [
+
         meteoclimatic,
+
         weathercloud,
+
         meteocat,
+
         aemet
+
       ] =
+
         await Promise.all(
+
           [
 
             getMeteoclimatic(),
@@ -1105,6 +1455,7 @@ export default {
             getAemet(env)
 
           ]
+
         );
 
 
@@ -1118,13 +1469,17 @@ export default {
 
         sources: {
 
-          meteoclimatic,
+          meteoclimatic:
+            meteoclimatic,
 
-          weathercloud,
+          weathercloud:
+            weathercloud,
 
-          meteocat,
+          meteocat:
+            meteocat,
 
-          aemet
+          aemet:
+            aemet
 
         }
 
@@ -1133,16 +1488,18 @@ export default {
     }
 
 
-    /*
-     * --------------------------------------------------
-     * METEOCLIMATIC
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // FONT: METEOCLIMATIC
+    // ========================================================
 
     if (
       url.pathname ===
       "/source/meteoclimatic"
     ) {
+
+      const stations =
+        await getMeteoclimatic();
+
 
       return json({
 
@@ -1152,24 +1509,29 @@ export default {
         source:
           "Meteoclimatic",
 
+        updated:
+          new Date().toISOString(),
+
         stations:
-          await getMeteoclimatic()
+          stations
 
       });
 
     }
 
 
-    /*
-     * --------------------------------------------------
-     * WEATHERCloud
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // FONT: WEATHERCloud
+    // ========================================================
 
     if (
       url.pathname ===
       "/source/weathercloud"
     ) {
+
+      const stations =
+        await getWeathercloud();
+
 
       return json({
 
@@ -1179,55 +1541,64 @@ export default {
         source:
           "Weathercloud",
 
+        updated:
+          new Date().toISOString(),
+
         stations:
-          await getWeathercloud()
+          stations
 
       });
 
     }
 
 
-    /*
-     * --------------------------------------------------
-     * METEOCAT
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // FONT: METEOCAT
+    // ========================================================
 
     if (
       url.pathname ===
       "/source/meteocat"
     ) {
 
+      const data =
+        await getMeteocat(
+          env
+        );
+
+
       return json(
-        await getMeteocat(env)
+        data
       );
 
     }
 
 
-    /*
-     * --------------------------------------------------
-     * AEMET
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // FONT: AEMET
+    // ========================================================
 
     if (
       url.pathname ===
       "/source/aemet"
     ) {
 
+      const data =
+        await getAemet(
+          env
+        );
+
+
       return json(
-        await getAemet(env)
+        data
       );
 
     }
 
 
-    /*
-     * --------------------------------------------------
-     * STATIONS
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // TOTES LES ESTACIONS
+    // ========================================================
 
     if (
       url.pathname ===
@@ -1235,10 +1606,15 @@ export default {
     ) {
 
       const [
+
         meteoclimatic,
+
         weathercloud
+
       ] =
+
         await Promise.all(
+
           [
 
             getMeteoclimatic(),
@@ -1246,17 +1622,17 @@ export default {
             getWeathercloud()
 
           ]
+
         );
 
 
-      const stations =
-        [
+      const stations = [
 
-          ...meteoclimatic,
+        ...meteoclimatic,
 
-          ...weathercloud
+        ...weathercloud
 
-        ];
+      ];
 
 
       return json({
@@ -1267,24 +1643,28 @@ export default {
         updated:
           new Date().toISOString(),
 
-        stations
+        stations:
+          stations
 
       });
 
     }
 
 
-    /*
-     * --------------------------------------------------
-     * DEFAULT /
-     * --------------------------------------------------
-     */
+    // ========================================================
+    // RUTA PRINCIPAL "/"
+    // ========================================================
 
     const [
+
       meteoclimatic,
+
       weathercloud
+
     ] =
+
       await Promise.all(
+
         [
 
           getMeteoclimatic(),
@@ -1292,17 +1672,17 @@ export default {
           getWeathercloud()
 
         ]
+
       );
 
 
-    const stations =
-      [
+    const stations = [
 
-        ...meteoclimatic,
+      ...meteoclimatic,
 
-        ...weathercloud
+      ...weathercloud
 
-      ];
+    ];
 
 
     const summary =
@@ -1319,9 +1699,11 @@ export default {
       updated:
         new Date().toISOString(),
 
-      summary,
+      summary:
+        summary,
 
-      stations,
+      stations:
+        stations,
 
       sources: {
 
