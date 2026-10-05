@@ -509,6 +509,238 @@ export function calculateRainWindow(
 
 }
 
+/* ============================================================
+ * CALCULAR PRECIPITACIÓ PER ESTACIÓ
+ *
+ * Calcula la diferència de pluja de cada estació
+ * respecte al punt històric més proper al període
+ * sol·licitat.
+ *
+ * Exemple:
+ *
+ * calculateStationRainWindow(history, 10)
+ *
+ * retorna la pluja acumulada dels últims 10 minuts
+ * per a cada estació.
+ * ============================================================ */
+
+export function calculateStationRainWindow(
+  history,
+  minutes
+) {
+
+  if (
+    !Array.isArray(history) ||
+    history.length < 2
+  ) {
+
+    return [];
+
+  }
+
+
+  const latest =
+    history[
+      history.length - 1
+    ];
+
+
+  if (
+    !latest ||
+    !Array.isArray(
+      latest.stations
+    )
+  ) {
+
+    return [];
+
+  }
+
+
+  const targetEpoch =
+    latest.epoch -
+    (
+      minutes *
+      60 *
+      1000
+    );
+
+
+  const previous =
+    findHistoryPoint(
+      history,
+      targetEpoch
+    );
+
+
+  if (
+    !previous ||
+    !Array.isArray(
+      previous.stations
+    )
+  ) {
+
+    return [];
+
+  }
+
+
+  const results = [];
+
+
+  for (
+    const currentStation of latest.stations
+  ) {
+
+    const previousStation =
+      previous.stations.find(
+        station =>
+          station.id ===
+          currentStation.id &&
+          station.source ===
+          currentStation.source
+      );
+
+
+    if (
+      !previousStation
+    ) {
+
+      results.push({
+
+        id:
+          currentStation.id,
+
+        name:
+          currentStation.name,
+
+        source:
+          currentStation.source,
+
+        rain:
+          null,
+
+        minutes:
+          minutes,
+
+        start:
+          previous.epoch,
+
+        end:
+          latest.epoch
+
+      });
+
+      continue;
+
+    }
+
+
+    const currentRain =
+      Number(
+        currentStation.rain
+      );
+
+
+    const previousRain =
+      Number(
+        previousStation.rain
+      );
+
+
+    if (
+      !Number.isFinite(
+        currentRain
+      ) ||
+      !Number.isFinite(
+        previousRain
+      )
+    ) {
+
+      results.push({
+
+        id:
+          currentStation.id,
+
+        name:
+          currentStation.name,
+
+        source:
+          currentStation.source,
+
+        rain:
+          null,
+
+        minutes:
+          minutes,
+
+        start:
+          previous.epoch,
+
+        end:
+          latest.epoch
+
+      });
+
+      continue;
+
+    }
+
+
+    let difference =
+      currentRain -
+      previousRain;
+
+
+    /*
+     * Si el comptador s'ha reiniciat,
+     * evitem valors negatius.
+     */
+
+    if (
+      difference < 0
+    ) {
+
+      difference = 0;
+
+    }
+
+
+    results.push({
+
+      id:
+        currentStation.id,
+
+      name:
+        currentStation.name,
+
+      source:
+        currentStation.source,
+
+      rain:
+        Number(
+          difference.toFixed(
+            2
+          )
+        ),
+
+      minutes:
+        minutes,
+
+      start:
+        previous.epoch,
+
+      end:
+        latest.epoch
+
+    });
+
+  }
+
+
+  return results;
+
+}
 
 /* ============================================================
  * CALCULAR TOTES LES FINESTRES
